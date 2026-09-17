@@ -22,6 +22,8 @@ as `conslov` can still match `Construction/Slovakia`.
 - Dolphin and KDE Frameworks/KIO
 - Bash
 - `rofi`
+- A C compiler, `pkg-config`, and the `rofi` development files during
+  installation (the Arch Linux `rofi` package includes them)
 - GNU `find`, `realpath`, `sort`, and `mv`
 - `notify-send` is optional but recommended for completion and error messages
 
@@ -40,6 +42,7 @@ The installer writes:
 ```text
 ~/.local/bin/fuzzy-move
 ~/.local/share/kio/servicemenus/fuzzy-move.desktop
+~/.local/share/fuzzy-mover/fuzzy-mover.so
 ```
 
 The second path is rooted at `$XDG_DATA_HOME` when that variable is set.
@@ -53,6 +56,10 @@ Restart Dolphin after installation. One way to do that is:
 kquitapp6 dolphin
 dolphin >/dev/null 2>&1 &
 ```
+
+Running `./install.sh` again updates all installed components without changing
+the configured Photos root. Run it again after a `rofi` upgrade as well, so the
+picker plugin is rebuilt for the installed `rofi` version.
 
 ## Configuration
 
@@ -76,12 +83,35 @@ printf '%s\n' '/mnt/archive/Photos' \
 A leading `~` is supported. The `FUZZY_MOVER_PHOTOS_ROOT` environment variable
 overrides both the configuration file and the default.
 
+The picker uses rofi's `Arc-Dark` theme by default. To choose another installed
+rofi theme, put its name in:
+
+```text
+~/.config/fuzzy-mover/rofi-theme
+```
+
+For example:
+
+```bash
+printf '%s\n' 'gruvbox-dark' \
+    > "${XDG_CONFIG_HOME:-$HOME/.config}/fuzzy-mover/rofi-theme"
+```
+
+An absolute path to a custom `.rasi` file also works. Use an empty file to let
+rofi use its global theme instead. `FUZZY_MOVER_ROFI_THEME` overrides this
+setting.
+
 ## Usage
 
 1. Select one or more images in Dolphin.
 2. Right-click and choose **Move to Photos…**, or use its keyboard shortcut.
 3. Type any fuzzy query, use the arrow keys to select a directory, and press
    Enter.
+
+Results are ranked first by the longest contiguous part of the query found in
+the path. Remaining ties are handled by `rofi`. For example, `__ungrouped`
+ranks ahead of `unknown green` for the query `ungr`, while fully fuzzy queries
+such as `conslov` continue to work.
 
 On Dolphin 26.04 or newer, assign a shortcut under:
 
