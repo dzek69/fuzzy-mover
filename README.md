@@ -84,6 +84,27 @@ printf '%s\n' '/mnt/archive/Photos' \
 A leading `~` is supported. The `FUZZY_MOVER_PHOTOS_ROOT` environment variable
 overrides both the configuration file and the default.
 
+To hide destination directories from the picker, put one POSIX extended regular
+expression per line in:
+
+```text
+~/.config/fuzzy-mover/exclude-regexes
+```
+
+Each expression is matched against individual directory names, not the entire
+relative path. A matching directory and all of its descendants are excluded.
+Empty lines and lines beginning with `#` are ignored. For example, this hides
+directories whose names begin with an uppercase `S`, one or more digits, and a
+space:
+
+```text
+^S[[:digit:]]+[[:space:]]
+```
+
+An invalid expression stops the operation with an error instead of silently
+showing an incomplete destination list. `FUZZY_MOVER_EXCLUDE_FILE` can point to
+an alternative file; point it to `/dev/null` to disable exclusions temporarily.
+
 The picker uses rofi's `Arc-Dark` theme by default. To choose another installed
 rofi theme, put its name in:
 

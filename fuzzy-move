@@ -5,6 +5,7 @@ set -u
 readonly APP_NAME="fuzzy-mover"
 readonly CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/$APP_NAME/photos-root"
 readonly THEME_CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/$APP_NAME/rofi-theme"
+readonly EXCLUDE_CONFIG_FILE="${FUZZY_MOVER_EXCLUDE_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/$APP_NAME/exclude-regexes}"
 readonly PLUGIN_FILE="${FUZZY_MOVER_PLUGIN_FILE:-${XDG_DATA_HOME:-$HOME/.local/share}/$APP_NAME/fuzzy-mover.so}"
 
 notify() {
@@ -34,6 +35,26 @@ files_have_same_hash() {
     [[ "${first_hash%% *}" == "${second_hash%% *}" ]]
 }
 
+directory_is_excluded() {
+    local relative_path="$1"
+    local component
+    local exclude_regex
+
+    while true; do
+        component=${relative_path%%/*}
+        for exclude_regex in "${exclude_regexes[@]}"; do
+            if [[ "$component" =~ $exclude_regex ]]; then
+                return 0
+            fi
+        done
+
+        [[ "$relative_path" == */* ]] || break
+        relative_path=${relative_path#*/}
+    done
+
+    return 1
+}
+
 photos_root="${FUZZY_MOVER_PHOTOS_ROOT:-$HOME/Photos}"
 
 if [[ -z "${FUZZY_MOVER_PHOTOS_ROOT:-}" && -r "$CONFIG_FILE" ]]; then
@@ -49,6 +70,23 @@ fi
 rofi_theme="${FUZZY_MOVER_ROFI_THEME-Arc-Dark}"
 if [[ -z "${FUZZY_MOVER_ROFI_THEME+x}" && -r "$THEME_CONFIG_FILE" ]]; then
     IFS= read -r rofi_theme < "$THEME_CONFIG_FILE" || true
+fi
+
+exclude_regexes=()
+if [[ -r "$EXCLUDE_CONFIG_FILE" ]]; then
+    exclude_line_number=0
+    while IFS= read -r exclude_regex || [[ -n "$exclude_regex" ]]; do
+        exclude_line_number=$((exclude_line_number + 1))
+        exclude_regex=${exclude_regex%$'\r'}
+        [[ -z "$exclude_regex" ]] && continue
+        [[ "$exclude_regex" =~ ^[[:space:]]*# ]] && continue
+
+        [[ "" =~ $exclude_regex ]] 2>/dev/null
+        regex_status=$?
+        (( regex_status != 2 )) || \
+            fail "Invalid exclusion regex on line $exclude_line_number: $exclude_regex"
+        exclude_regexes+=("$exclude_regex")
+    done < "$EXCLUDE_CONFIG_FILE"
 fi
 
 (( $# > 0 )) || fail "Dolphin did not pass any files."
@@ -87,8 +125,14 @@ if [[ -n "$rofi_theme" ]]; then
     rofi_arguments+=(-theme "$rofi_theme")
 fi
 
-find "$photos_root_real" -mindepth 1 -type d -printf '%P\n' 2>/dev/null \
-    | LC_ALL=C sort -f > "$choices_file"
+while IFS= read -r relative_directory; do
+    if ! directory_is_excluded "$relative_directory"; then
+        printf '%s\n' "$relative_directory"
+    fi
+done < <(
+    find "$photos_root_real" -mindepth 1 -type d -printf '%P\n' 2>/dev/null \
+        | LC_ALL=C sort -f
+) > "$choices_file"
 [[ -s "$choices_file" ]] || fail "No destination directories were found."
 
 FUZZY_MOVER_CHOICES_FILE="$choices_file" \
@@ -99,6 +143,8 @@ FUZZY_MOVER_RESULT_FILE="$result_file" \
 IFS= read -r destination < "$result_file"
 
 [[ -n "$destination" ]] || exit 0
+directory_is_excluded "$destination" && \
+    fail "The selected directory is excluded by configuration: $destination"
 
 target_dir=$(realpath -e -- "$photos_root_real/$destination") || \
     fail "The selected directory no longer exists: $destination"
