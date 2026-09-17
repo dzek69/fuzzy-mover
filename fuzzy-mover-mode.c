@@ -8,9 +8,17 @@
 G_MODULE_EXPORT Mode mode;
 
 typedef struct {
+    guint chunks;
+    guint start;
+} SubsequenceMatch;
+
+typedef struct {
     GPtrArray *entries;
     GPtrArray *folded_entries;
+    GArray *entry_order;
     guint *longest_runs;
+    guint *chunk_counts;
+    guint *start_positions;
     gchar *query;
     gchar *folded_query;
     gchar *result_file;
@@ -49,6 +57,154 @@ static guint longest_common_substring(const gchar *left, const gchar *right)
     return longest;
 }
 
+static SubsequenceMatch best_subsequence_match(const gchar *query,
+                                               const gchar *entry)
+{
+    glong query_length = 0;
+    glong entry_length = 0;
+    gunichar *query_chars = g_utf8_to_ucs4_fast(
+        query,
+        -1,
+        &query_length);
+    gunichar *entry_chars = g_utf8_to_ucs4_fast(
+        entry,
+        -1,
+        &entry_length);
+    const guint impossible = G_MAXUINT / 2;
+    guint *previous_chunks = g_new(guint, entry_length);
+    guint *current_chunks = g_new(guint, entry_length);
+    guint *previous_starts = g_new(guint, entry_length);
+    guint *current_starts = g_new(guint, entry_length);
+
+    if (query_length == 0) {
+        g_free(current_starts);
+        g_free(previous_starts);
+        g_free(current_chunks);
+        g_free(previous_chunks);
+        g_free(entry_chars);
+        g_free(query_chars);
+        return (SubsequenceMatch){0, 0};
+    }
+
+    for (glong j = 0; j < entry_length; ++j) {
+        previous_chunks[j] = impossible;
+        previous_starts[j] = impossible;
+    }
+
+    for (glong i = 0; i < query_length; ++i) {
+        guint best_noncontiguous_chunks = impossible;
+        guint best_noncontiguous_start = impossible;
+
+        for (glong j = 0; j < entry_length; ++j) {
+            current_chunks[j] = impossible;
+            current_starts[j] = impossible;
+
+            if (j >= 2) {
+                const guint candidate_chunks = previous_chunks[j - 2];
+                const guint candidate_start = previous_starts[j - 2];
+
+                if (candidate_chunks < best_noncontiguous_chunks ||
+                    (candidate_chunks == best_noncontiguous_chunks &&
+                     candidate_start < best_noncontiguous_start)) {
+                    best_noncontiguous_chunks = candidate_chunks;
+                    best_noncontiguous_start = candidate_start;
+                }
+            }
+            if (query_chars[i] != entry_chars[j]) {
+                continue;
+            }
+
+            if (i == 0) {
+                current_chunks[j] = 1;
+                current_starts[j] = (guint)j;
+                continue;
+            }
+            if (j > 0 && previous_chunks[j - 1] < impossible) {
+                current_chunks[j] = previous_chunks[j - 1];
+                current_starts[j] = previous_starts[j - 1];
+            }
+            if (best_noncontiguous_chunks < impossible) {
+                const guint split_chunks = best_noncontiguous_chunks + 1;
+
+                if (split_chunks < current_chunks[j] ||
+                    (split_chunks == current_chunks[j] &&
+                     best_noncontiguous_start < current_starts[j])) {
+                    current_chunks[j] = split_chunks;
+                    current_starts[j] = best_noncontiguous_start;
+                }
+            }
+        }
+
+        guint *temporary = previous_chunks;
+        previous_chunks = current_chunks;
+        current_chunks = temporary;
+        temporary = previous_starts;
+        previous_starts = current_starts;
+        current_starts = temporary;
+    }
+
+    guint chunks = impossible;
+    guint start = impossible;
+    for (glong j = 0; j < entry_length; ++j) {
+        if (previous_chunks[j] < chunks ||
+            (previous_chunks[j] == chunks && previous_starts[j] < start)) {
+            chunks = previous_chunks[j];
+            start = previous_starts[j];
+        }
+    }
+
+    g_free(current_starts);
+    g_free(previous_starts);
+    g_free(current_chunks);
+    g_free(previous_chunks);
+    g_free(entry_chars);
+    g_free(query_chars);
+
+    if (chunks == impossible) {
+        return (SubsequenceMatch){(guint)query_length, (guint)entry_length};
+    }
+    return (SubsequenceMatch){chunks, start};
+}
+
+static gint compare_entry_order(gconstpointer left_pointer,
+                                gconstpointer right_pointer,
+                                gpointer user_data)
+{
+    const FuzzyMoverModeData *data = user_data;
+    const guint left = *(const guint *)left_pointer;
+    const guint right = *(const guint *)right_pointer;
+
+    if (data->query != NULL && *data->query != '\0') {
+        if (data->longest_runs[left] != data->longest_runs[right]) {
+            return data->longest_runs[left] > data->longest_runs[right]
+                       ? -1
+                       : 1;
+        }
+        if (data->chunk_counts[left] != data->chunk_counts[right]) {
+            return data->chunk_counts[left] < data->chunk_counts[right]
+                       ? -1
+                       : 1;
+        }
+        if (data->start_positions[left] != data->start_positions[right]) {
+            return data->start_positions[left] < data->start_positions[right]
+                       ? -1
+                       : 1;
+        }
+    }
+
+    if (left == right) {
+        return 0;
+    }
+    return left < right ? -1 : 1;
+}
+
+static guint ordered_entry_index(const FuzzyMoverModeData *data, guint index)
+{
+    return data->entry_order == NULL
+               ? index
+               : g_array_index(data->entry_order, guint, index);
+}
+
 static int fuzzy_mover_mode_init(Mode *sw)
 {
     const gchar *choices_file = g_getenv("FUZZY_MOVER_CHOICES_FILE");
@@ -85,6 +241,14 @@ static int fuzzy_mover_mode_init(Mode *sw)
 
     g_strfreev(lines);
     g_free(contents);
+    data->entry_order = g_array_sized_new(
+        FALSE,
+        FALSE,
+        sizeof(guint),
+        data->entries->len);
+    for (guint i = 0; i < data->entries->len; ++i) {
+        g_array_append_val(data->entry_order, i);
+    }
     mode_set_private_data(sw, data);
     return TRUE;
 }
@@ -99,7 +263,10 @@ static void fuzzy_mover_mode_destroy(Mode *sw)
 
     g_ptr_array_free(data->entries, TRUE);
     g_ptr_array_free(data->folded_entries, TRUE);
+    g_array_free(data->entry_order, TRUE);
     g_free(data->longest_runs);
+    g_free(data->chunk_counts);
+    g_free(data->start_positions);
     g_free(data->query);
     g_free(data->folded_query);
     g_free(data->result_file);
@@ -129,7 +296,8 @@ static char *fuzzy_mover_get_display_value(const Mode *sw,
         return NULL;
     }
 
-    return g_strdup(g_ptr_array_index(data->entries, selected_line));
+    const guint entry_index = ordered_entry_index(data, selected_line);
+    return g_strdup(g_ptr_array_index(data->entries, entry_index));
 }
 
 static char *fuzzy_mover_get_completion(const Mode *sw,
@@ -141,16 +309,8 @@ static char *fuzzy_mover_get_completion(const Mode *sw,
         return g_strdup("");
     }
 
-    if (data->query == NULL || *data->query == '\0') {
-        return g_strdup(g_ptr_array_index(data->entries, selected_line));
-    }
-
-    const glong query_length = g_utf8_strlen(data->query, -1);
-    const glong prefix_length = MIN(
-        (glong)data->longest_runs[selected_line],
-        query_length);
-    const gchar *end = g_utf8_offset_to_pointer(data->query, prefix_length);
-    return g_strndup(data->query, end - data->query);
+    const guint entry_index = ordered_entry_index(data, selected_line);
+    return g_strdup(g_ptr_array_index(data->entries, entry_index));
 }
 
 static char *fuzzy_mover_preprocess_input(Mode *sw, const char *input)
@@ -160,18 +320,30 @@ static char *fuzzy_mover_preprocess_input(Mode *sw, const char *input)
     g_free(data->query);
     g_free(data->folded_query);
     g_free(data->longest_runs);
+    g_free(data->chunk_counts);
+    g_free(data->start_positions);
     data->query = g_strdup(input);
     data->folded_query = g_utf8_casefold(input, -1);
     data->longest_runs = g_new0(guint, data->entries->len);
+    data->chunk_counts = g_new0(guint, data->entries->len);
+    data->start_positions = g_new0(guint, data->entries->len);
 
-    if (*data->folded_query != '\0') {
-        for (guint i = 0; i < data->folded_entries->len; ++i) {
+    for (guint i = 0; i < data->folded_entries->len; ++i) {
+        g_array_index(data->entry_order, guint, i) = i;
+        if (*data->folded_query != '\0') {
             const gchar *entry = g_ptr_array_index(data->folded_entries, i);
+            const SubsequenceMatch subsequence = best_subsequence_match(
+                data->folded_query,
+                entry);
+
             data->longest_runs[i] = longest_common_substring(
                 data->folded_query,
                 entry);
+            data->chunk_counts[i] = subsequence.chunks;
+            data->start_positions[i] = subsequence.start;
         }
     }
+    g_array_sort_with_data(data->entry_order, compare_entry_order, data);
 
     return g_strdup(input);
 }
@@ -185,9 +357,10 @@ static int fuzzy_mover_token_match(const Mode *sw,
     if (data == NULL || index >= data->entries->len) {
         return FALSE;
     }
+    const guint entry_index = ordered_entry_index(data, index);
     return helper_token_match(
         (rofi_int_matcher *const *)tokens,
-        g_ptr_array_index(data->entries, index));
+        g_ptr_array_index(data->entries, entry_index));
 }
 
 static ModeMode fuzzy_mover_mode_result(Mode *sw,
@@ -200,7 +373,8 @@ static ModeMode fuzzy_mover_mode_result(Mode *sw,
     (void)input;
     if ((menu_retv & MENU_OK) && data != NULL &&
         selected_line < data->entries->len) {
-        const gchar *entry = g_ptr_array_index(data->entries, selected_line);
+        const guint entry_index = ordered_entry_index(data, selected_line);
+        const gchar *entry = g_ptr_array_index(data->entries, entry_index);
         GError *error = NULL;
 
         if (!g_file_set_contents(data->result_file, entry, -1, &error)) {

@@ -131,9 +131,11 @@ setting.
    Enter.
 
 Results are ranked first by the longest contiguous part of the query found in
-the path. Remaining ties are handled by `rofi`. For example, `__ungrouped`
-ranks ahead of `unknown green` for the query `ungr`, while fully fuzzy queries
-such as `conslov` continue to work.
+the path. If that is tied, a match made from fewer contiguous chunks wins; if
+that is tied too, an earlier match wins. For example, `__ungrouped` ranks ahead
+of `unknown green` for `ungr`, `Outdoors/Pros` ranks ahead of `Mountains/Pros`
+for `outpros`, and `Images/Pies` ranks ahead of `Images/Apple pies` for `pies`.
+Fully fuzzy queries such as `conslov` continue to work.
 
 On Dolphin 26.04 or newer, assign a shortcut under:
 

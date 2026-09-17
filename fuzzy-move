@@ -118,8 +118,7 @@ rofi_arguments=(
     -display-fuzzy-mover "Move to Photos"
     -i
     -matching fuzzy
-    -sort
-    -sorting-method normal
+    -no-sort
 )
 if [[ -n "$rofi_theme" ]]; then
     rofi_arguments+=(-theme "$rofi_theme")
