@@ -24,7 +24,8 @@ as `conslov` can still match `Construction/Slovakia`.
 - `rofi`
 - A C compiler, `pkg-config`, and the `rofi` development files during
   installation (the Arch Linux `rofi` package includes them)
-- GNU `find`, `realpath`, `sort`, and `mv`
+- GNU `find`, `realpath`, `sort`, `mv`, and `sha256sum`
+- `send2trash` or `trash` for safely removing confirmed duplicates
 - `notify-send` is optional but recommended for completion and error messages
 
 Keyboard shortcuts for Service Menu actions require Dolphin 26.04 or newer.
@@ -121,11 +122,16 @@ On Dolphin 26.04 or newer, assign a shortcut under:
 
 ## Safety behavior
 
-- Existing destination files are never intentionally overwritten. A source
-  file with a colliding name is left in place and counted as skipped.
+- Existing destination files are never intentionally overwritten. If a path
+  with the same name already exists, both files are compared using SHA-256.
+  An identical source is sent to the system Trash; a different source is moved
+  under the first available numbered name, for example `image (1).png`, then
+  `image (2).png`. Occupied numbered names are checked for duplicates too.
 - A destination symlink leading outside the configured Photos tree is rejected.
-- The operation uses `mv` directly, so it is not registered in Dolphin's Undo
-  history. Keep a backup of irreplaceable recovered files.
+- Moves use `mv` directly and duplicate removal prefers `send2trash`, falling
+  back to `trash` when necessary, so the operation is not registered in
+  Dolphin's Undo history. Trashed duplicates can be recovered from the system
+  Trash until it is emptied. Keep a backup of irreplaceable recovered files.
 
 ## Uninstallation
 

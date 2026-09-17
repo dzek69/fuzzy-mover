@@ -24,6 +24,16 @@ fail() {
     exit 1
 }
 
+files_have_same_hash() {
+    local first_hash
+    local second_hash
+
+    [[ -f "$1" && -f "$2" ]] || return 1
+    first_hash=$(sha256sum < "$1") || return 1
+    second_hash=$(sha256sum < "$2") || return 1
+    [[ "${first_hash%% *}" == "${second_hash%% *}" ]]
+}
+
 photos_root="${FUZZY_MOVER_PHOTOS_ROOT:-$HOME/Photos}"
 
 if [[ -z "${FUZZY_MOVER_PHOTOS_ROOT:-}" && -r "$CONFIG_FILE" ]]; then
@@ -43,6 +53,14 @@ fi
 
 (( $# > 0 )) || fail "Dolphin did not pass any files."
 command -v rofi >/dev/null 2>&1 || fail "rofi was not found."
+command -v sha256sum >/dev/null 2>&1 || fail "sha256sum was not found."
+if command -v send2trash >/dev/null 2>&1; then
+    trash_command=(send2trash)
+elif command -v trash >/dev/null 2>&1; then
+    trash_command=(trash)
+else
+    fail "Neither send2trash nor trash was found."
+fi
 [[ -d "$photos_root" ]] || fail "The destination directory does not exist: $photos_root"
 [[ -f "$PLUGIN_FILE" ]] || fail "The rofi plugin was not found. Run the installer again."
 
@@ -93,6 +111,8 @@ case "$target_dir/" in
 esac
 
 moved=0
+renamed=0
+duplicates_trashed=0
 skipped=0
 
 for source in "$@"; do
@@ -102,23 +122,72 @@ for source in "$@"; do
     fi
 
     filename=${source##*/}
-    target="$target_dir/$filename"
-
-    # Recovered data is more important than convenience. Never overwrite an
-    # existing path, even if it is a broken symlink.
-    if [[ -e "$target" || -L "$target" ]]; then
-        skipped=$((skipped + 1))
-        continue
+    stem="$filename"
+    extension=""
+    filename_without_extension=${filename%.*}
+    if [[ "$filename" == *.* && -n "$filename_without_extension" ]]; then
+        stem="$filename_without_extension"
+        extension=".${filename##*.}"
     fi
 
-    if mv --no-clobber -- "$source" "$target"; then
-        moved=$((moved + 1))
-    else
+    number=0
+    while true; do
+        if (( number == 0 )); then
+            target="$target_dir/$filename"
+        else
+            target="$target_dir/$stem ($number)$extension"
+        fi
+
+        # Never overwrite an existing path, including a broken symlink. Check
+        # every occupied numbered variant for identical contents before trying
+        # the next available name.
+        if [[ -e "$target" || -L "$target" ]]; then
+            if [[ "$source" == "$target" ]]; then
+                skipped=$((skipped + 1))
+                break
+            fi
+
+            if files_have_same_hash "$source" "$target"; then
+                if "${trash_command[@]}" -- "$source"; then
+                    duplicates_trashed=$((duplicates_trashed + 1))
+                else
+                    skipped=$((skipped + 1))
+                fi
+                break
+            fi
+
+            number=$((number + 1))
+            continue
+        fi
+
+        if mv --no-clobber -- "$source" "$target"; then
+            if [[ ! -e "$source" && ! -L "$source" ]]; then
+                moved=$((moved + 1))
+                if (( number > 0 )); then
+                    renamed=$((renamed + 1))
+                fi
+                break
+            fi
+
+            # The destination may have appeared after the check above. Retry
+            # it so it is hashed or numbered just like any other collision.
+            if [[ -e "$target" || -L "$target" ]]; then
+                continue
+            fi
+        fi
+
         skipped=$((skipped + 1))
-    fi
+        break
+    done
 done
 
 summary="Moved: $moved → $destination"
+if (( renamed > 0 )); then
+    summary+="; renamed: $renamed"
+fi
+if (( duplicates_trashed > 0 )); then
+    summary+="; duplicates trashed: $duplicates_trashed"
+fi
 if (( skipped > 0 )); then
     summary+="; skipped: $skipped"
 fi
