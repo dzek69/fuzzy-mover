@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+
+set -u
+
+readonly APP_NAME="fuzzy-mover"
+readonly CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/$APP_NAME/photos-root"
+
+notify() {
+    local urgency="$1"
+    local title="$2"
+    local message="$3"
+
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send --app-name="$APP_NAME" --urgency="$urgency" "$title" "$message"
+    else
+        printf '%s: %s\n' "$title" "$message" >&2
+    fi
+}
+
+fail() {
+    notify critical "Fuzzy mover" "$1"
+    exit 1
+}
+
+photos_root="${FUZZY_MOVER_PHOTOS_ROOT:-$HOME/Photos}"
+
+if [[ -z "${FUZZY_MOVER_PHOTOS_ROOT:-}" && -r "$CONFIG_FILE" ]]; then
+    IFS= read -r configured_root < "$CONFIG_FILE"
+    case "$configured_root" in
+        "~") photos_root="$HOME" ;;
+        "~/"*) photos_root="$HOME/${configured_root#\~/}" ;;
+        "") ;;
+        *) photos_root="$configured_root" ;;
+    esac
+fi
+
+(( $# > 0 )) || fail "Dolphin did not pass any files."
+command -v rofi >/dev/null 2>&1 || fail "rofi was not found."
+[[ -d "$photos_root" ]] || fail "The destination directory does not exist: $photos_root"
+
+photos_root_real=$(realpath -e -- "$photos_root") || \
+    fail "The destination directory cannot be read: $photos_root"
+
+destination=$(
+    find "$photos_root_real" -mindepth 1 -type d -printf '%P\n' 2>/dev/null \
+        | LC_ALL=C sort -f \
+        | rofi -dmenu \
+            -i \
+            -matching fuzzy \
+            -sort \
+            -no-custom \
+            -p "Move to Photos"
+) || exit 0
+
+[[ -n "$destination" ]] || exit 0
+
+target_dir=$(realpath -e -- "$photos_root_real/$destination") || \
+    fail "The selected directory no longer exists: $destination"
+
+# Rofi only receives directories found under Photos. This also rejects a
+# symlink that would lead outside the destination tree.
+case "$target_dir/" in
+    "$photos_root_real/"*) ;;
+    *) fail "The selected directory is outside Photos." ;;
+esac
+
+moved=0
+skipped=0
+
+for source in "$@"; do
+    if [[ ! -f "$source" && ! -L "$source" ]]; then
+        skipped=$((skipped + 1))
+        continue
+    fi
+
+    filename=${source##*/}
+    target="$target_dir/$filename"
+
+    # Recovered data is more important than convenience. Never overwrite an
+    # existing path, even if it is a broken symlink.
+    if [[ -e "$target" || -L "$target" ]]; then
+        skipped=$((skipped + 1))
+        continue
+    fi
+
+    if mv --no-clobber -- "$source" "$target"; then
+        moved=$((moved + 1))
+    else
+        skipped=$((skipped + 1))
+    fi
+done
+
+summary="Moved: $moved → $destination"
+if (( skipped > 0 )); then
+    summary+="; skipped: $skipped"
+fi
+
+notify normal "Photo organizer" "$summary"
