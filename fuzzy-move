@@ -48,6 +48,7 @@ destination=$(
             -i \
             -matching fuzzy \
             -sort \
+            -sorting-method fzf \
             -no-custom \
             -p "Move to Photos"
 ) || exit 0
