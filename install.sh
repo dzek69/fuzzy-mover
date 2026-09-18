@@ -42,6 +42,8 @@ installed_plugin="$data_home/fuzzy-mover/fuzzy-mover.so"
 [[ -f "$script_dir/fuzzy-move" ]] || die "missing source file: fuzzy-move"
 [[ -f "$script_dir/fuzzy-move.desktop.in" ]] || die "missing source file: fuzzy-move.desktop.in"
 [[ -f "$script_dir/fuzzy-mover-mode.c" ]] || die "missing source file: fuzzy-mover-mode.c"
+[[ -f "$script_dir/fuzzy-mover-ranking.c" ]] || die "missing source file: fuzzy-mover-ranking.c"
+[[ -f "$script_dir/fuzzy-mover-ranking.h" ]] || die "missing source file: fuzzy-mover-ranking.h"
 command -v cc >/dev/null 2>&1 || die "a C compiler (cc) is required"
 command -v pkg-config >/dev/null 2>&1 || die "pkg-config is required"
 pkg-config --exists rofi glib-2.0 || \
@@ -70,7 +72,7 @@ done < "$script_dir/fuzzy-move.desktop.in" > "$temporary_desktop"
 
 cc -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror -fPIC -shared \
     $(pkg-config --cflags rofi) \
-    "$script_dir/fuzzy-mover-mode.c" \
+    "$script_dir/fuzzy-mover-mode.c" "$script_dir/fuzzy-mover-ranking.c" \
     $(pkg-config --libs glib-2.0) \
     -o "$temporary_plugin" || die "the rofi plugin could not be built"
 

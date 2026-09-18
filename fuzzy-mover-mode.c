@@ -5,166 +5,18 @@
 #include <rofi/mode-private.h>
 #include <rofi/mode.h>
 
-G_MODULE_EXPORT Mode mode;
+#include "fuzzy-mover-ranking.h"
 
-typedef struct {
-    guint chunks;
-    guint start;
-} SubsequenceMatch;
+G_MODULE_EXPORT Mode mode;
 
 typedef struct {
     GPtrArray *entries;
     GPtrArray *folded_entries;
     GArray *entry_order;
-    guint *longest_runs;
-    guint *chunk_counts;
-    guint *start_positions;
-    gchar *query;
+    FuzzyMoverMatch *scores;
     gchar *folded_query;
     gchar *result_file;
 } FuzzyMoverModeData;
-
-static guint longest_common_substring(const gchar *left, const gchar *right)
-{
-    glong left_length = 0;
-    glong right_length = 0;
-    gunichar *left_chars = g_utf8_to_ucs4_fast(left, -1, &left_length);
-    gunichar *right_chars = g_utf8_to_ucs4_fast(right, -1, &right_length);
-    guint *previous = g_new0(guint, right_length + 1);
-    guint *current = g_new0(guint, right_length + 1);
-    guint longest = 0;
-
-    for (glong i = 0; i < left_length; ++i) {
-        for (glong j = 0; j < right_length; ++j) {
-            if (left_chars[i] == right_chars[j]) {
-                current[j + 1] = previous[j] + 1;
-                longest = MAX(longest, current[j + 1]);
-            } else {
-                current[j + 1] = 0;
-            }
-        }
-
-        guint *temporary = previous;
-        previous = current;
-        current = temporary;
-        memset(current, 0, sizeof(guint) * (right_length + 1));
-    }
-
-    g_free(current);
-    g_free(previous);
-    g_free(right_chars);
-    g_free(left_chars);
-    return longest;
-}
-
-static SubsequenceMatch best_subsequence_match(const gchar *query,
-                                               const gchar *entry)
-{
-    glong query_length = 0;
-    glong entry_length = 0;
-    gunichar *query_chars = g_utf8_to_ucs4_fast(
-        query,
-        -1,
-        &query_length);
-    gunichar *entry_chars = g_utf8_to_ucs4_fast(
-        entry,
-        -1,
-        &entry_length);
-    const guint impossible = G_MAXUINT / 2;
-    guint *previous_chunks = g_new(guint, entry_length);
-    guint *current_chunks = g_new(guint, entry_length);
-    guint *previous_starts = g_new(guint, entry_length);
-    guint *current_starts = g_new(guint, entry_length);
-
-    if (query_length == 0) {
-        g_free(current_starts);
-        g_free(previous_starts);
-        g_free(current_chunks);
-        g_free(previous_chunks);
-        g_free(entry_chars);
-        g_free(query_chars);
-        return (SubsequenceMatch){0, 0};
-    }
-
-    for (glong j = 0; j < entry_length; ++j) {
-        previous_chunks[j] = impossible;
-        previous_starts[j] = impossible;
-    }
-
-    for (glong i = 0; i < query_length; ++i) {
-        guint best_noncontiguous_chunks = impossible;
-        guint best_noncontiguous_start = impossible;
-
-        for (glong j = 0; j < entry_length; ++j) {
-            current_chunks[j] = impossible;
-            current_starts[j] = impossible;
-
-            if (j >= 2) {
-                const guint candidate_chunks = previous_chunks[j - 2];
-                const guint candidate_start = previous_starts[j - 2];
-
-                if (candidate_chunks < best_noncontiguous_chunks ||
-                    (candidate_chunks == best_noncontiguous_chunks &&
-                     candidate_start < best_noncontiguous_start)) {
-                    best_noncontiguous_chunks = candidate_chunks;
-                    best_noncontiguous_start = candidate_start;
-                }
-            }
-            if (query_chars[i] != entry_chars[j]) {
-                continue;
-            }
-
-            if (i == 0) {
-                current_chunks[j] = 1;
-                current_starts[j] = (guint)j;
-                continue;
-            }
-            if (j > 0 && previous_chunks[j - 1] < impossible) {
-                current_chunks[j] = previous_chunks[j - 1];
-                current_starts[j] = previous_starts[j - 1];
-            }
-            if (best_noncontiguous_chunks < impossible) {
-                const guint split_chunks = best_noncontiguous_chunks + 1;
-
-                if (split_chunks < current_chunks[j] ||
-                    (split_chunks == current_chunks[j] &&
-                     best_noncontiguous_start < current_starts[j])) {
-                    current_chunks[j] = split_chunks;
-                    current_starts[j] = best_noncontiguous_start;
-                }
-            }
-        }
-
-        guint *temporary = previous_chunks;
-        previous_chunks = current_chunks;
-        current_chunks = temporary;
-        temporary = previous_starts;
-        previous_starts = current_starts;
-        current_starts = temporary;
-    }
-
-    guint chunks = impossible;
-    guint start = impossible;
-    for (glong j = 0; j < entry_length; ++j) {
-        if (previous_chunks[j] < chunks ||
-            (previous_chunks[j] == chunks && previous_starts[j] < start)) {
-            chunks = previous_chunks[j];
-            start = previous_starts[j];
-        }
-    }
-
-    g_free(current_starts);
-    g_free(previous_starts);
-    g_free(current_chunks);
-    g_free(previous_chunks);
-    g_free(entry_chars);
-    g_free(query_chars);
-
-    if (chunks == impossible) {
-        return (SubsequenceMatch){(guint)query_length, (guint)entry_length};
-    }
-    return (SubsequenceMatch){chunks, start};
-}
 
 static gint compare_entry_order(gconstpointer left_pointer,
                                 gconstpointer right_pointer,
@@ -174,21 +26,13 @@ static gint compare_entry_order(gconstpointer left_pointer,
     const guint left = *(const guint *)left_pointer;
     const guint right = *(const guint *)right_pointer;
 
-    if (data->query != NULL && *data->query != '\0') {
-        if (data->longest_runs[left] != data->longest_runs[right]) {
-            return data->longest_runs[left] > data->longest_runs[right]
-                       ? -1
-                       : 1;
-        }
-        if (data->chunk_counts[left] != data->chunk_counts[right]) {
-            return data->chunk_counts[left] < data->chunk_counts[right]
-                       ? -1
-                       : 1;
-        }
-        if (data->start_positions[left] != data->start_positions[right]) {
-            return data->start_positions[left] < data->start_positions[right]
-                       ? -1
-                       : 1;
+    if (data->folded_query != NULL && *data->folded_query != '\0') {
+        const gint comparison = fuzzy_mover_compare_matches(
+            &data->scores[left],
+            &data->scores[right]);
+
+        if (comparison != 0) {
+            return comparison;
         }
     }
 
@@ -264,10 +108,7 @@ static void fuzzy_mover_mode_destroy(Mode *sw)
     g_ptr_array_free(data->entries, TRUE);
     g_ptr_array_free(data->folded_entries, TRUE);
     g_array_free(data->entry_order, TRUE);
-    g_free(data->longest_runs);
-    g_free(data->chunk_counts);
-    g_free(data->start_positions);
-    g_free(data->query);
+    g_free(data->scores);
     g_free(data->folded_query);
     g_free(data->result_file);
     g_free(data);
@@ -317,35 +158,22 @@ static char *fuzzy_mover_preprocess_input(Mode *sw, const char *input)
 {
     FuzzyMoverModeData *data = mode_get_private_data(sw);
 
-    g_free(data->query);
     g_free(data->folded_query);
-    g_free(data->longest_runs);
-    g_free(data->chunk_counts);
-    g_free(data->start_positions);
-    data->query = g_strdup(input);
-    data->folded_query = g_utf8_casefold(input, -1);
-    data->longest_runs = g_new0(guint, data->entries->len);
-    data->chunk_counts = g_new0(guint, data->entries->len);
-    data->start_positions = g_new0(guint, data->entries->len);
+    g_free(data->scores);
+    data->folded_query = fuzzy_mover_normalize_query(input);
+    data->scores = g_new0(FuzzyMoverMatch, data->entries->len);
 
     for (guint i = 0; i < data->folded_entries->len; ++i) {
-        g_array_index(data->entry_order, guint, i) = i;
-        if (*data->folded_query != '\0') {
-            const gchar *entry = g_ptr_array_index(data->folded_entries, i);
-            const SubsequenceMatch subsequence = best_subsequence_match(
-                data->folded_query,
-                entry);
+        const gchar *entry = g_ptr_array_index(data->folded_entries, i);
 
-            data->longest_runs[i] = longest_common_substring(
-                data->folded_query,
-                entry);
-            data->chunk_counts[i] = subsequence.chunks;
-            data->start_positions[i] = subsequence.start;
-        }
+        g_array_index(data->entry_order, guint, i) = i;
+        data->scores[i] = fuzzy_mover_score_match(
+            data->folded_query,
+            entry);
     }
     g_array_sort_with_data(data->entry_order, compare_entry_order, data);
 
-    return g_strdup(input);
+    return g_strdup(data->folded_query);
 }
 
 static int fuzzy_mover_token_match(const Mode *sw,
@@ -357,10 +185,9 @@ static int fuzzy_mover_token_match(const Mode *sw,
     if (data == NULL || index >= data->entries->len) {
         return FALSE;
     }
+    (void)tokens;
     const guint entry_index = ordered_entry_index(data, index);
-    return helper_token_match(
-        (rofi_int_matcher *const *)tokens,
-        g_ptr_array_index(data->entries, entry_index));
+    return data->scores[entry_index].matched;
 }
 
 static ModeMode fuzzy_mover_mode_result(Mode *sw,

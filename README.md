@@ -135,7 +135,9 @@ the path. If that is tied, a match made from fewer contiguous chunks wins; if
 that is tied too, an earlier match wins. For example, `__ungrouped` ranks ahead
 of `unknown green` for `ungr`, `Outdoors/Pros` ranks ahead of `Mountains/Pros`
 for `outpros`, and `Images/Pies` ranks ahead of `Images/Apple pies` for `pies`.
-Fully fuzzy queries such as `conslov` continue to work.
+Fully fuzzy queries such as `conslov` continue to work. Whitespace in a query
+is ignored for matching, so `les pro` behaves like one ordered `lespro`
+subsequence: matches cannot go backwards or reuse characters between words.
 
 On Dolphin 26.04 or newer, assign a shortcut under:
 
@@ -155,6 +157,17 @@ On Dolphin 26.04 or newer, assign a shortcut under:
   back to `trash` when necessary, so the operation is not registered in
   Dolphin's Undo history. Trashed duplicates can be recovered from the system
   Trash until it is emptied. Keep a backup of irreplaceable recovered files.
+
+## Tests
+
+Run the ranking and matching regression tests with:
+
+```bash
+./test.sh
+```
+
+The suite includes all ranking examples documented above, as well as spaced
+queries that must preserve character order and cannot reuse matched characters.
 
 ## Uninstallation
 
