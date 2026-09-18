@@ -25,6 +25,42 @@ fail() {
     exit 1
 }
 
+set_photos_root() {
+    (( $# == 1 )) || fail "Select exactly one directory to use as the Photos root."
+
+    local selected_root="$1"
+    local selected_root_real
+    local config_dir
+    local temporary_config
+
+    [[ -d "$selected_root" ]] || fail "The selected Photos root is not a directory: $selected_root"
+    [[ "$selected_root" != *$'\n'* && "$selected_root" != *$'\r'* ]] || \
+        fail "The Photos root path cannot contain a line break."
+
+    selected_root_real=$(realpath -e -- "$selected_root") || \
+        fail "The selected Photos root cannot be read: $selected_root"
+    config_dir=${CONFIG_FILE%/*}
+    mkdir -p -- "$config_dir" || fail "The configuration directory could not be created."
+    temporary_config=$(mktemp "$config_dir/photos-root.XXXXXX") || \
+        fail "A temporary configuration file could not be created."
+
+    if ! printf '%s\n' "$selected_root_real" > "$temporary_config" || \
+            ! mv -- "$temporary_config" "$CONFIG_FILE"; then
+        rm -f -- "$temporary_config"
+        fail "The Photos root configuration could not be saved."
+    fi
+
+    notify normal "Fuzzy mover" "Photos root set to: $selected_root_real"
+}
+
+trim_whitespace() {
+    local value="$1"
+
+    value=${value#"${value%%[![:space:]]*}"}
+    value=${value%"${value##*[![:space:]]}"}
+    printf '%s' "$value"
+}
+
 files_have_same_hash() {
     local first_hash
     local second_hash
@@ -54,6 +90,22 @@ directory_is_excluded() {
 
     return 1
 }
+
+operation="move"
+case "${1-}" in
+    --set-photos-root)
+        shift
+        set_photos_root "$@"
+        exit 0
+        ;;
+    --new-s-folder)
+        operation="new-s-folder"
+        shift
+        ;;
+    --)
+        shift
+        ;;
+esac
 
 photos_root="${FUZZY_MOVER_PHOTOS_ROOT:-$HOME/Photos}"
 
@@ -154,6 +206,62 @@ case "$target_dir/" in
     "$photos_root_real/"*) ;;
     *) fail "The selected directory is outside Photos." ;;
 esac
+
+if [[ "$operation" == "new-s-folder" ]]; then
+    name_arguments=(
+        -dmenu
+        -p "New S-folder name"
+        -l 0
+    )
+    if [[ -n "$rofi_theme" ]]; then
+        name_arguments+=(-theme "$rofi_theme")
+    fi
+
+    if ! new_folder_name=$(rofi "${name_arguments[@]}" </dev/null); then
+        exit 0
+    fi
+    new_folder_name=$(trim_whitespace "$new_folder_name")
+
+    [[ -n "$new_folder_name" ]] || fail "The new S-folder name cannot be empty."
+    [[ "$new_folder_name" != */* ]] || fail "The new S-folder name cannot contain a slash."
+    [[ "$new_folder_name" != *$'\n'* && "$new_folder_name" != *$'\r'* ]] || \
+        fail "The new S-folder name cannot contain a line break."
+
+    highest_s_number=0
+    while IFS= read -r -d '' existing_directory; do
+        existing_name=${existing_directory##*/}
+        if [[ "$existing_name" =~ ^S([[:digit:]]+)[[:space:]] ]]; then
+            existing_number=${BASH_REMATCH[1]}
+            while [[ "$existing_number" == 0* && ${#existing_number} -gt 1 ]]; do
+                existing_number=${existing_number#0}
+            done
+            (( ${#existing_number} <= 18 )) || \
+                fail "An existing S-folder number is too large: $existing_name"
+            existing_number=$((10#$existing_number))
+            if (( existing_number > highest_s_number )); then
+                highest_s_number=$existing_number
+            fi
+        fi
+    done < <(find "$target_dir" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+
+    next_s_number=$((highest_s_number + 1))
+    while true; do
+        new_folder_basename="S$next_s_number $new_folder_name"
+        new_target_dir="$target_dir/$new_folder_basename"
+        if mkdir -- "$new_target_dir" 2>/dev/null; then
+            target_dir="$new_target_dir"
+            destination="$destination/$new_folder_basename"
+            break
+        fi
+
+        if [[ -e "$new_target_dir" || -L "$new_target_dir" ]]; then
+            next_s_number=$((next_s_number + 1))
+            continue
+        fi
+
+        fail "The new S-folder could not be created: $new_folder_basename"
+    done
+fi
 
 moved=0
 renamed=0

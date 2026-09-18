@@ -1,0 +1,23 @@
+[Desktop Entry]
+Type=Service
+Name=Fuzzy mover
+Name[pl]=Fuzzy mover
+MimeType=inode/directory;
+Actions=fuzzyMoverSetRoot;
+X-KDE-Priority=TopLevel
+X-KDE-MinNumberOfUrls=1
+X-KDE-MaxNumberOfUrls=1
+
+[Desktop Action fuzzyMoverSetRoot]
+Name=Set as Fuzzy Mover Photos Root
+Name[pl]=Ustaw jako katalog główny Photos w Fuzzy Mover
+Name[de]=Als Photos-Stammordner für Fuzzy Mover festlegen
+Name[es]=Establecer como raíz de Photos de Fuzzy Mover
+Name[fr]=Définir comme racine Photos de Fuzzy Mover
+Name[it]=Imposta come radice Photos di Fuzzy Mover
+Name[pt_BR]=Definir como raiz de Photos do Fuzzy Mover
+Name[uk]=Встановити як кореневу теку Photos для Fuzzy Mover
+Name[zh_CN]=设为 Fuzzy Mover 的 Photos 根目录
+Name[ja]=Fuzzy Mover の Photos ルートに設定
+Icon=folder-pictures
+Exec=@EXECUTABLE@ --set-photos-root %f

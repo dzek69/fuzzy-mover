@@ -2,9 +2,11 @@
 
 `fuzzy-mover` is a helper tool created for my own needs to quickly sort recovered photos that landed in a single folder
 without original names and structure.
-It adds a **Move to Photos…** action to Dolphin. Select one or more
-images, invoke the action, fuzzy-search the directory tree under `Photos`, and
-press Enter to move the files there.
+It adds **Move to Photos…** and **Move to a New S-folder…** actions to
+Dolphin. Select one or more images, invoke an action, fuzzy-search the directory
+tree under `Photos`, and press Enter to move the files there. A third action on
+directories, **Set as Fuzzy Mover Photos Root**, changes which directory is used
+as `Photos` without editing a configuration file.
 
 Destination entries use paths relative to the Photos root, for example:
 
@@ -24,7 +26,7 @@ as `conslov` can still match `Construction/Slovakia`.
 - `rofi`
 - A C compiler, `pkg-config`, and the `rofi` development files during
   installation (the Arch Linux `rofi` package includes them)
-- GNU `find`, `realpath`, `sort`, `mv`, and `sha256sum`
+- GNU `find`, `realpath`, `sort`, `mkdir`, `mv`, and `sha256sum`
 - `send2trash` or `trash` for safely removing confirmed duplicates
 - `notify-send` is optional but recommended for completion and error messages
 
@@ -43,6 +45,7 @@ The installer writes:
 ```text
 ~/.local/bin/fuzzy-move
 ~/.local/share/kio/servicemenus/fuzzy-move.desktop
+~/.local/share/kio/servicemenus/fuzzy-mover-set-root.desktop
 ~/.local/share/fuzzy-mover/fuzzy-mover.so
 ```
 
@@ -64,8 +67,9 @@ picker plugin is rebuilt for the installed `rofi` version.
 
 ## Configuration
 
-The default Photos root is `~/Photos`. To use another directory, put its path
-as the only line in:
+The default Photos root is `~/Photos`. To change it from Dolphin, right-click
+the desired directory and choose **Set as Fuzzy Mover Photos Root**. The action
+stores the directory's canonical absolute path as the only line in:
 
 ```text
 ~/.config/fuzzy-mover/photos-root
@@ -81,8 +85,9 @@ printf '%s\n' '/mnt/archive/Photos' \
     > "${XDG_CONFIG_HOME:-$HOME/.config}/fuzzy-mover/photos-root"
 ```
 
-A leading `~` is supported. The `FUZZY_MOVER_PHOTOS_ROOT` environment variable
-overrides both the configuration file and the default.
+You can also edit that file manually; a leading `~` is supported. The
+`FUZZY_MOVER_PHOTOS_ROOT` environment variable overrides both the configuration
+file and the default.
 
 To hide destination directories from the picker, put one POSIX extended regular
 expression per line in:
@@ -125,10 +130,25 @@ setting.
 
 ## Usage
 
+To move files into an existing directory:
+
 1. Select one or more images in Dolphin.
 2. Right-click and choose **Move to Photos…**, or use its keyboard shortcut.
 3. Type any fuzzy query, use the arrow keys to select a directory, and press
    Enter.
+
+To create a numbered subdirectory for the selected files, choose **Move to a
+New S-folder…** instead. First select its parent with the same fuzzy picker,
+then type the descriptive part of its name. If the parent already contains
+`S1 Old`, `S2 Another`, and `S3 Previous`, entering `My name` creates
+`S4 My name` and moves the selected files there. Numbering uses the highest
+matching direct child plus one, so `S1` and `S3` also produce `S4` rather than
+filling the gap. Only directories matching an uppercase `S`, decimal digits,
+and whitespace are counted.
+
+This pairs with an exclusion such as `^S[[:digit:]]+[[:space:]]`: finished
+S-folders stay out of the destination picker, while the new action can still
+create the next one below the selected parent.
 
 Results are ranked first by the longest contiguous part of the query found in
 the path. If that is tied, a match made from fewer contiguous chunks wins; if
@@ -141,9 +161,10 @@ subsequence: matches cannot go backwards or reuse characters between words.
 
 On Dolphin 26.04 or newer, assign a shortcut under:
 
-**Settings → Configure Keyboard Shortcuts… → Context Menu Actions → Move to Photos…**
+**Settings → Configure Keyboard Shortcuts… → Context Menu Actions**
 
-`Alt+M` is a convenient choice if it is unused in your setup.
+Both image actions appear there. `Alt+M` is a convenient choice for the regular
+move if it is unused in your setup.
 
 ## Safety behavior
 
@@ -166,8 +187,9 @@ Run the ranking and matching regression tests with:
 ./test.sh
 ```
 
-The suite includes all ranking examples documented above, as well as spaced
-queries that must preserve character order and cannot reuse matched characters.
+The suite includes all ranking examples documented above, spaced queries that
+must preserve character order and cannot reuse matched characters, Photos-root
+configuration, exclusion of finished S-folders, and next-S-folder creation.
 
 ## Uninstallation
 

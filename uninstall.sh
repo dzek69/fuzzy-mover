@@ -36,17 +36,23 @@ data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
 installed_executable="$bin_dir/fuzzy-move"
 installed_service="$data_home/kio/servicemenus/fuzzy-move.desktop"
+installed_root_service="$data_home/kio/servicemenus/fuzzy-mover-set-root.desktop"
 installed_plugin="$data_home/fuzzy-mover/fuzzy-mover.so"
 config_file="$config_home/fuzzy-mover/photos-root"
 theme_config_file="$config_home/fuzzy-mover/rofi-theme"
 exclude_config_file="$config_home/fuzzy-mover/exclude-regexes"
 
-rm -f -- "$installed_executable" "$installed_service" "$installed_plugin"
+rm -f -- \
+    "$installed_executable" \
+    "$installed_service" \
+    "$installed_root_service" \
+    "$installed_plugin"
 rmdir -- "$data_home/fuzzy-mover" 2>/dev/null || true
 
 printf 'Removed:\n'
 printf '  %s\n' "$installed_executable"
 printf '  %s\n' "$installed_service"
+printf '  %s\n' "$installed_root_service"
 printf '  %s\n' "$installed_plugin"
 
 if [[ "$purge_config" == true ]]; then

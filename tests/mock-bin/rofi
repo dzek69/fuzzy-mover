@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+set -u
+
+is_dmenu=false
+for argument in "$@"; do
+    if [[ "$argument" == "-dmenu" ]]; then
+        is_dmenu=true
+        break
+    fi
+done
+
+if [[ "$is_dmenu" == true ]]; then
+    if [[ "${FUZZY_MOVER_TEST_CANCEL_NAME:-false}" == true ]]; then
+        exit 1
+    fi
+    printf '%s\n' "${FUZZY_MOVER_TEST_FOLDER_NAME-}"
+    exit 0
+fi
+
+if [[ -n "${FUZZY_MOVER_TEST_FORBIDDEN_CHOICE:-}" ]] && \
+        grep -Fxq -- "$FUZZY_MOVER_TEST_FORBIDDEN_CHOICE" "$FUZZY_MOVER_CHOICES_FILE"; then
+    printf 'Unexpected destination in picker: %s\n' \
+        "$FUZZY_MOVER_TEST_FORBIDDEN_CHOICE" >&2
+    exit 2
+fi
+
+printf '%s\n' "$FUZZY_MOVER_TEST_DESTINATION" > "$FUZZY_MOVER_RESULT_FILE"

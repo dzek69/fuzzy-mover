@@ -37,10 +37,13 @@ data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
 service_dir="$data_home/kio/servicemenus"
 installed_executable="$bin_dir/fuzzy-move"
 installed_service="$service_dir/fuzzy-move.desktop"
+installed_root_service="$service_dir/fuzzy-mover-set-root.desktop"
 installed_plugin="$data_home/fuzzy-mover/fuzzy-mover.so"
 
 [[ -f "$script_dir/fuzzy-move" ]] || die "missing source file: fuzzy-move"
 [[ -f "$script_dir/fuzzy-move.desktop.in" ]] || die "missing source file: fuzzy-move.desktop.in"
+[[ -f "$script_dir/fuzzy-mover-set-root.desktop.in" ]] || \
+    die "missing source file: fuzzy-mover-set-root.desktop.in"
 [[ -f "$script_dir/fuzzy-mover-mode.c" ]] || die "missing source file: fuzzy-mover-mode.c"
 [[ -f "$script_dir/fuzzy-mover-ranking.c" ]] || die "missing source file: fuzzy-mover-ranking.c"
 [[ -f "$script_dir/fuzzy-mover-ranking.h" ]] || die "missing source file: fuzzy-mover-ranking.h"
@@ -60,15 +63,34 @@ pkg-config --exists rofi glib-2.0 || \
 temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/fuzzy-mover-install.XXXXXX")
 trap 'rm -rf -- "$temporary_dir"' EXIT HUP INT TERM
 temporary_desktop="$temporary_dir/fuzzy-move.desktop"
+temporary_root_desktop="$temporary_dir/fuzzy-mover-set-root.desktop"
 temporary_plugin="$temporary_dir/fuzzy-mover.so"
 
-while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" == 'Exec=@EXECUTABLE@ %F' ]]; then
-        printf 'Exec="%s" %%F\n' "$installed_executable"
-    else
-        printf '%s\n' "$line"
-    fi
-done < "$script_dir/fuzzy-move.desktop.in" > "$temporary_desktop"
+render_desktop() {
+    local template="$1"
+    local output="$2"
+    local line
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+            'Exec=@EXECUTABLE@ %F')
+                printf 'Exec="%s" %%F\n' "$installed_executable"
+                ;;
+            'Exec=@EXECUTABLE@ --new-s-folder %F')
+                printf 'Exec="%s" --new-s-folder %%F\n' "$installed_executable"
+                ;;
+            'Exec=@EXECUTABLE@ --set-photos-root %f')
+                printf 'Exec="%s" --set-photos-root %%f\n' "$installed_executable"
+                ;;
+            *)
+                printf '%s\n' "$line"
+                ;;
+        esac
+    done < "$template" > "$output"
+}
+
+render_desktop "$script_dir/fuzzy-move.desktop.in" "$temporary_desktop"
+render_desktop "$script_dir/fuzzy-mover-set-root.desktop.in" "$temporary_root_desktop"
 
 cc -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror -fPIC -shared \
     $(pkg-config --cflags rofi) \
@@ -78,11 +100,13 @@ cc -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror -fPIC -shared \
 
 install -Dm755 -- "$script_dir/fuzzy-move" "$installed_executable"
 install -Dm755 -- "$temporary_desktop" "$installed_service"
+install -Dm755 -- "$temporary_root_desktop" "$installed_root_service"
 install -Dm755 -- "$temporary_plugin" "$installed_plugin"
 
 printf 'Installed fuzzy-mover:\n'
 printf '  executable:   %s\n' "$installed_executable"
 printf '  Dolphin menu: %s\n' "$installed_service"
+printf '  Dolphin menu: %s\n' "$installed_root_service"
 printf '  rofi plugin:  %s\n' "$installed_plugin"
 
 if ! command -v rofi >/dev/null 2>&1; then
